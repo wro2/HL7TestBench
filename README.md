@@ -19,10 +19,8 @@ A Java desktop application for testing HL7 v2 message transmission. Designed for
 ### Installing Java
 
 **Windows:**
-```
-winget install EclipseAdoptium.Temurin.21.JDK
-```
-Or download from: https://adoptium.net/temurin/releases/
+
+Just download it from https://www.oracle.com/java/technologies/downloads/
 
 **Ubuntu/Debian:**
 ```bash
