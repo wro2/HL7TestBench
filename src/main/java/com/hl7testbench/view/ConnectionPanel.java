@@ -2,7 +2,8 @@ package com.hl7testbench.view;
 
 import com.hl7testbench.model.ConnectionConfig;
 import com.hl7testbench.model.ConnectionConfig.TransportMode;
-import com.hl7testbench.model.SavedServer;
+import com.hl7testbench.service.ServerConfigRepository;
+import com.hl7testbench.service.ServerConfigRepository.SavedServerConfig;
 import com.hl7testbench.util.UIConstants;
 
 import javax.swing.*;
@@ -14,11 +15,14 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Simplified panel for configuring connection settings with saved server support.
+ * Panel for configuring connection settings with saved server support.
+ * Uses injected repository for persistence.
  */
 public class ConnectionPanel extends JPanel {
 
-    private final JComboBox<SavedServer> serverComboBox;
+    private final ServerConfigRepository repository;
+
+    private final JComboBox<SavedServerConfig> serverComboBox;
     private final JComboBox<TransportMode> modeComboBox;
     private final JTextField hostField;
     private final JSpinner portSpinner;
@@ -28,22 +32,25 @@ public class ConnectionPanel extends JPanel {
     private final JPasswordField keystorePasswordField;
     private final JSpinner timeoutSpinner;
 
-    private final JPanel mllpFieldsPanel;
-    private final JPanel httpFieldsPanel;
+    private final JPanel connectionFieldsPanel;
+    private final CardLayout connectionFieldsLayout;
 
-    private final JButton saveServerButton;
-    private final JButton deleteServerButton;
-
-    private List<SavedServer> savedServers;
+    private List<SavedServerConfig> savedServers;
     private boolean updatingFromServer = false;
 
     public ConnectionPanel() {
+        this(new ServerConfigRepository());
+    }
+
+    public ConnectionPanel(ServerConfigRepository repository) {
+        this.repository = repository;
+
         setLayout(new BorderLayout(10, 10));
         TitledBorder border = new TitledBorder("Server Connection");
         border.setTitleFont(UIConstants.TITLE_FONT);
         setBorder(border);
 
-        savedServers = new ArrayList<>(SavedServer.loadAll());
+        savedServers = new ArrayList<>(repository.loadAll());
 
         serverComboBox = new JComboBox<>();
         serverComboBox.setFont(UIConstants.INPUT_FONT);
@@ -63,11 +70,13 @@ public class ConnectionPanel extends JPanel {
         keystorePasswordField.setFont(UIConstants.INPUT_FONT);
         timeoutSpinner = createSpinner(10000, 1000, 300000);
 
-        saveServerButton = createButton("Save Server");
-        deleteServerButton = createButton("Delete");
+        JButton saveServerButton = createButton("Save Server");
+        JButton deleteServerButton = createButton("Delete");
 
-        mllpFieldsPanel = createMllpFieldsPanel();
-        httpFieldsPanel = createHttpFieldsPanel();
+        connectionFieldsLayout = new CardLayout();
+        connectionFieldsPanel = new JPanel(connectionFieldsLayout);
+        connectionFieldsPanel.add(createMllpFieldsPanel(), TransportMode.MLLP_TCP.name());
+        connectionFieldsPanel.add(createHttpFieldsPanel(), TransportMode.HTTP.name());
 
         JPanel mainPanel = new JPanel(new GridBagLayout());
         GridBagConstraints gbc = new GridBagConstraints();
@@ -93,9 +102,6 @@ public class ConnectionPanel extends JPanel {
         mainPanel.add(timeoutSpinner, gbc);
 
         gbc.gridx = 0; gbc.gridy = 2; gbc.gridwidth = 5; gbc.fill = GridBagConstraints.HORIZONTAL;
-        JPanel connectionFieldsPanel = new JPanel(new CardLayout());
-        connectionFieldsPanel.add(mllpFieldsPanel, TransportMode.MLLP_TCP.name());
-        connectionFieldsPanel.add(httpFieldsPanel, TransportMode.HTTP.name());
         mainPanel.add(connectionFieldsPanel, gbc);
 
         gbc.gridy = 3; gbc.gridwidth = 5;
@@ -105,10 +111,9 @@ public class ConnectionPanel extends JPanel {
 
         modeComboBox.addActionListener(e -> {
             if (!updatingFromServer) {
-                CardLayout cl = (CardLayout) connectionFieldsPanel.getLayout();
                 TransportMode mode = (TransportMode) modeComboBox.getSelectedItem();
                 if (mode != null) {
-                    cl.show(connectionFieldsPanel, mode.name());
+                    connectionFieldsLayout.show(connectionFieldsPanel, mode.name());
                 }
             }
         });
@@ -200,13 +205,13 @@ public class ConnectionPanel extends JPanel {
 
     private void refreshServerComboBox() {
         serverComboBox.removeAllItems();
-        for (SavedServer server : savedServers) {
+        for (SavedServerConfig server : savedServers) {
             serverComboBox.addItem(server);
         }
     }
 
     private void loadSelectedServer() {
-        SavedServer selected = (SavedServer) serverComboBox.getSelectedItem();
+        SavedServerConfig selected = (SavedServerConfig) serverComboBox.getSelectedItem();
         if (selected == null) return;
 
         updatingFromServer = true;
@@ -217,17 +222,7 @@ public class ConnectionPanel extends JPanel {
             urlField.setText(selected.httpUrl());
             tlsCheckBox.setSelected(selected.useTls());
             timeoutSpinner.setValue(selected.timeoutMs());
-
-            Container parent = modeComboBox.getParent();
-            while (parent != null) {
-                for (Component c : parent.getComponents()) {
-                    if (c instanceof JPanel panel && panel.getLayout() instanceof CardLayout cl) {
-                        cl.show(panel, selected.mode().name());
-                        break;
-                    }
-                }
-                parent = parent.getParent();
-            }
+            connectionFieldsLayout.show(connectionFieldsPanel, selected.mode().name());
         } finally {
             updatingFromServer = false;
         }
@@ -243,12 +238,12 @@ public class ConnectionPanel extends JPanel {
         if (name == null || name.isBlank()) return;
 
         ConnectionConfig config = getConnectionConfig();
-        SavedServer newServer = SavedServer.fromConfig(name.trim(), config);
+        SavedServerConfig newServer = SavedServerConfig.fromConnectionConfig(name.trim(), config);
 
         savedServers.removeIf(s -> s.name().equals(newServer.name()));
         savedServers.add(0, newServer);
 
-        SavedServer.saveAll(savedServers);
+        repository.saveAll(savedServers);
         refreshServerComboBox();
         serverComboBox.setSelectedItem(newServer);
 
@@ -259,7 +254,7 @@ public class ConnectionPanel extends JPanel {
     }
 
     private void deleteSelectedServer() {
-        SavedServer selected = (SavedServer) serverComboBox.getSelectedItem();
+        SavedServerConfig selected = (SavedServerConfig) serverComboBox.getSelectedItem();
         if (selected == null) return;
 
         int confirm = JOptionPane.showConfirmDialog(this,
@@ -269,7 +264,7 @@ public class ConnectionPanel extends JPanel {
 
         if (confirm == JOptionPane.YES_OPTION) {
             savedServers.remove(selected);
-            SavedServer.saveAll(savedServers);
+            repository.saveAll(savedServers);
             refreshServerComboBox();
         }
     }
@@ -289,9 +284,5 @@ public class ConnectionPanel extends JPanel {
                 keystorePasswordField.getPassword(),
                 (Integer) timeoutSpinner.getValue()
         );
-    }
-
-    public TransportMode getSelectedMode() {
-        return (TransportMode) modeComboBox.getSelectedItem();
     }
 }

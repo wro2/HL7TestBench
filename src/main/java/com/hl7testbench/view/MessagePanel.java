@@ -6,7 +6,6 @@ import com.hl7testbench.util.UIConstants;
 
 import javax.swing.*;
 import javax.swing.border.TitledBorder;
-import javax.swing.event.ListSelectionListener;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import javax.swing.table.DefaultTableModel;
 import java.awt.*;
@@ -16,21 +15,22 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Simplified message panel combining message input, file loading, and editing.
- * Users paste or load messages here, then send directly.
+ * Panel for message input, file loading, and editing.
+ * Emits actions via callbacks rather than exposing internal components.
  */
 public class MessagePanel extends JPanel {
 
     private final JTextArea messageArea;
     private final JTable messageTable;
     private final DefaultTableModel tableModel;
-    private final JButton loadFileButton;
     private final JButton sendButton;
     private final JButton sendAllButton;
-    private final JButton clearButton;
     private final JLabel statusLabel;
 
     private final List<HL7Message> loadedMessages = new ArrayList<>();
+
+    private Runnable onSendAction;
+    private Runnable onSendAllAction;
 
     private static final String[] COLUMN_NAMES = {"#", "Type", "Control ID"};
 
@@ -82,15 +82,14 @@ public class MessagePanel extends JPanel {
 
         statusLabel = new JLabel("No messages loaded");
         statusLabel.setFont(UIConstants.LABEL_FONT);
-
         tablePanel.add(statusLabel, BorderLayout.SOUTH);
 
         JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 15, 10));
 
-        loadFileButton = createButton("Load File...");
+        JButton loadFileButton = createButton("Load File...");
         sendButton = createButton("Send Message");
         sendAllButton = createButton("Send All");
-        clearButton = createButton("Clear");
+        JButton clearButton = createButton("Clear");
 
         sendButton.setBackground(new Color(46, 125, 50));
         sendButton.setForeground(Color.WHITE);
@@ -110,6 +109,12 @@ public class MessagePanel extends JPanel {
 
         loadFileButton.addActionListener(e -> loadFromFile());
         clearButton.addActionListener(e -> clear());
+        sendButton.addActionListener(e -> {
+            if (onSendAction != null) onSendAction.run();
+        });
+        sendAllButton.addActionListener(e -> {
+            if (onSendAllAction != null) onSendAllAction.run();
+        });
 
         messageTable.getSelectionModel().addListSelectionListener(e -> {
             if (!e.getValueIsAdjusting()) {
@@ -209,43 +214,20 @@ public class MessagePanel extends JPanel {
         return messageArea.getText();
     }
 
-    public void setMessageContent(String content) {
-        messageArea.setText(content);
-        messageArea.setCaretPosition(0);
-    }
-
-    public List<HL7Message> getSelectedMessages() {
-        List<HL7Message> selected = new ArrayList<>();
-        int[] selectedRows = messageTable.getSelectedRows();
-        for (int row : selectedRows) {
-            if (row >= 0 && row < loadedMessages.size()) {
-                selected.add(loadedMessages.get(row));
-            }
-        }
-        return selected;
-    }
-
     public List<HL7Message> getAllMessages() {
         return new ArrayList<>(loadedMessages);
     }
 
-    public void addTableSelectionListener(ListSelectionListener listener) {
-        messageTable.getSelectionModel().addListSelectionListener(listener);
+    public void setSendEnabled(boolean enabled) {
+        sendButton.setEnabled(enabled);
+        sendAllButton.setEnabled(enabled);
     }
 
-    public JButton getSendButton() {
-        return sendButton;
+    public void setOnSendAction(Runnable action) {
+        this.onSendAction = action;
     }
 
-    public JButton getSendAllButton() {
-        return sendAllButton;
-    }
-
-    public JButton getLoadFileButton() {
-        return loadFileButton;
-    }
-
-    public JTextArea getMessageArea() {
-        return messageArea;
+    public void setOnSendAllAction(Runnable action) {
+        this.onSendAllAction = action;
     }
 }

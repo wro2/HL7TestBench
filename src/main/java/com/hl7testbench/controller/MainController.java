@@ -3,8 +3,6 @@ package com.hl7testbench.controller;
 import com.hl7testbench.model.ConnectionConfig;
 import com.hl7testbench.model.HL7Message;
 import com.hl7testbench.model.TransportResult;
-import com.hl7testbench.observer.TransportObserver;
-import com.hl7testbench.observer.TransportSubject;
 import com.hl7testbench.transport.TransportFactory;
 import com.hl7testbench.transport.TransportStrategy;
 import com.hl7testbench.util.HL7Parser;
@@ -16,27 +14,22 @@ import java.util.List;
 
 /**
  * Main controller coordinating between views and transport layer.
- * Implements Observer pattern for receiving transport notifications and updating UI.
+ * Uses simple callbacks for transport notifications and UI updates.
  */
-public class MainController implements TransportObserver {
+public class MainController {
 
     private final MainFrame mainFrame;
-    private final TransportSubject transportSubject;
     private TransportWorker currentWorker;
 
     public MainController(MainFrame mainFrame) {
         this.mainFrame = mainFrame;
-        this.transportSubject = new TransportSubject();
-        this.transportSubject.addObserver(this);
-
         initializeEventHandlers();
     }
 
     private void initializeEventHandlers() {
         MessagePanel messagePanel = mainFrame.getMessagePanel();
-
-        messagePanel.getSendButton().addActionListener(e -> sendCurrentMessage());
-        messagePanel.getSendAllButton().addActionListener(e -> sendAllMessages());
+        messagePanel.setOnSendAction(this::sendCurrentMessage);
+        messagePanel.setOnSendAllAction(this::sendAllMessages);
     }
 
     /**
@@ -103,7 +96,7 @@ public class MainController implements TransportObserver {
      * Validates the connection configuration.
      */
     private boolean validateConfig(ConnectionConfig config) {
-        TransportStrategy transport = TransportFactory.getTransport(config);
+        TransportStrategy transport = TransportFactory.forConfig(config);
 
         if (!transport.validateConfig(config)) {
             if (config.mode() == ConnectionConfig.TransportMode.MLLP_TCP) {
@@ -128,11 +121,18 @@ public class MainController implements TransportObserver {
         }
 
         ConnectionConfig config = mainFrame.getConnectionPanel().getConnectionConfig();
+        TransportStrategy transport = TransportFactory.forConfig(config);
 
         setUIBusy(true);
         mainFrame.getStatusBar().setBusy("Sending " + messages.size() + " message(s)...");
 
-        currentWorker = new TransportWorker(messages, config, transportSubject);
+        currentWorker = new TransportWorker(
+                messages,
+                config,
+                transport,
+                this::onTransportCompleted,
+                () -> setUIBusy(false)
+        );
         currentWorker.execute();
     }
 
@@ -140,21 +140,17 @@ public class MainController implements TransportObserver {
      * Sets UI elements enabled/disabled based on busy state.
      */
     private void setUIBusy(boolean busy) {
-        mainFrame.getMessagePanel().getSendButton().setEnabled(!busy);
-        mainFrame.getMessagePanel().getSendAllButton().setEnabled(!busy);
+        mainFrame.getMessagePanel().setSendEnabled(!busy);
     }
 
     private void showWarning(String title, String message) {
         JOptionPane.showMessageDialog(mainFrame, message, title, JOptionPane.WARNING_MESSAGE);
     }
 
-    @Override
-    public void onTransportStarted(String messageControlId) {
-        mainFrame.getStatusBar().setBusy("Sending: " + messageControlId);
-    }
-
-    @Override
-    public void onTransportCompleted(TransportResult result) {
+    /**
+     * Handles transport completion for each message.
+     */
+    private void onTransportCompleted(TransportResult result) {
         mainFrame.getHistoryPanel().addResult(result);
 
         if (result.status().isSuccessful()) {
@@ -163,13 +159,5 @@ public class MainController implements TransportObserver {
             mainFrame.getStatusBar().setError("Failed: " + result.messageControlId() +
                     " - " + result.status().getDisplayName());
         }
-
-        setUIBusy(false);
-    }
-
-    @Override
-    public void onTransportProgress(String message) {
-        mainFrame.getStatusBar().setIdle(message);
-        setUIBusy(false);
     }
 }

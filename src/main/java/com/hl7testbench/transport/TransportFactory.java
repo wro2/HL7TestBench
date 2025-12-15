@@ -3,14 +3,33 @@ package com.hl7testbench.transport;
 import com.hl7testbench.model.ConnectionConfig;
 
 /**
- * Factory for creating transport strategy instances based on connection configuration.
+ * Factory for creating transport strategy instances.
+ * Supports both default singleton instances and custom injection for testing.
  */
-public final class TransportFactory {
+public class TransportFactory {
 
-    private static final MllpTransport MLLP_TRANSPORT = new MllpTransport();
-    private static final HttpTransport HTTP_TRANSPORT = new HttpTransport();
+    private final TransportStrategy mllpTransport;
+    private final TransportStrategy httpTransport;
 
-    private TransportFactory() {
+    private static final TransportFactory DEFAULT_INSTANCE = new TransportFactory(
+            new MllpTransport(),
+            new HttpTransport()
+    );
+
+    /**
+     * Creates a factory with custom transport implementations.
+     * Useful for testing with mocks.
+     */
+    public TransportFactory(TransportStrategy mllpTransport, TransportStrategy httpTransport) {
+        this.mllpTransport = mllpTransport;
+        this.httpTransport = httpTransport;
+    }
+
+    /**
+     * Returns the default factory instance.
+     */
+    public static TransportFactory getDefault() {
+        return DEFAULT_INSTANCE;
     }
 
     /**
@@ -18,19 +37,18 @@ public final class TransportFactory {
      *
      * @param config the connection configuration
      * @return the corresponding transport strategy
-     * @throws IllegalArgumentException if the transport mode is not supported
      */
-    public static TransportStrategy getTransport(ConnectionConfig config) {
+    public TransportStrategy getTransport(ConnectionConfig config) {
         return switch (config.mode()) {
-            case MLLP_TCP -> MLLP_TRANSPORT;
-            case HTTP -> HTTP_TRANSPORT;
+            case MLLP_TCP -> mllpTransport;
+            case HTTP -> httpTransport;
         };
     }
 
     /**
-     * Returns the HTTP transport instance for configuration.
+     * Convenience static method using default factory.
      */
-    public static HttpTransport getHttpTransport() {
-        return HTTP_TRANSPORT;
+    public static TransportStrategy forConfig(ConnectionConfig config) {
+        return DEFAULT_INSTANCE.getTransport(config);
     }
 }

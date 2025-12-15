@@ -41,7 +41,7 @@ public class MllpTransport implements TransportStrategy {
             out.write(framedMessage);
             out.flush();
 
-            String response = readResponse(in, config.timeoutMs());
+            String response = readResponse(in);
             long roundTripTime = System.currentTimeMillis() - startTime;
 
             return TransportResult.success(messageControlId, config.mode(), response, roundTripTime);
@@ -70,9 +70,6 @@ public class MllpTransport implements TransportStrategy {
         }
     }
 
-    /**
-     * Creates a socket with optional TLS/SSL support.
-     */
     private Socket createSocket(ConnectionConfig config) throws Exception {
         if (config.useTls()) {
             SSLContext sslContext = createSslContext(config);
@@ -82,14 +79,8 @@ public class MllpTransport implements TransportStrategy {
         return new Socket();
     }
 
-    /**
-     * Creates an SSL context using the configured keystore.
-     */
     private SSLContext createSslContext(ConnectionConfig config) throws Exception {
         SSLContext sslContext = SSLContext.getInstance("TLS");
-
-        KeyManagerFactory kmf = null;
-        TrustManagerFactory tmf = null;
 
         if (config.keystoreFile() != null && config.keystoreFile().exists()) {
             KeyStore keyStore = KeyStore.getInstance("JKS");
@@ -97,10 +88,10 @@ public class MllpTransport implements TransportStrategy {
                 keyStore.load(fis, config.keystorePassword());
             }
 
-            kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+            KeyManagerFactory kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
             kmf.init(keyStore, config.keystorePassword());
 
-            tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+            TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
             tmf.init(keyStore);
 
             sslContext.init(kmf.getKeyManagers(), tmf.getTrustManagers(), null);
@@ -111,9 +102,6 @@ public class MllpTransport implements TransportStrategy {
         return sslContext;
     }
 
-    /**
-     * Frames an HL7 message with MLLP delimiters.
-     */
     private byte[] frameMessage(String message) {
         byte[] messageBytes = message.getBytes(StandardCharsets.UTF_8);
         byte[] framed = new byte[messageBytes.length + 3];
@@ -127,32 +115,24 @@ public class MllpTransport implements TransportStrategy {
     }
 
     /**
-     * Reads an MLLP-framed response from the input stream.
-     * Strips the framing characters before returning.
+     * Reads an MLLP-framed response using blocking I/O.
+     * The socket timeout (set via setSoTimeout) handles the timeout case.
      */
-    private String readResponse(InputStream in, int timeoutMs) throws IOException {
+    private String readResponse(InputStream in) throws IOException {
         ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-        long deadline = System.currentTimeMillis() + timeoutMs;
         boolean startFound = false;
         boolean endBlockFound = false;
 
-        while (System.currentTimeMillis() < deadline) {
-            int available = in.available();
-            if (available == 0) {
-                try {
-                    Thread.sleep(10);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    break;
-                }
-                continue;
-            }
-
+        while (true) {
             int b = in.read();
-            if (b == -1) break;
+
+            if (b == -1) {
+                break;
+            }
 
             if (b == START_BLOCK) {
                 startFound = true;
+                buffer.reset();
                 continue;
             }
 
@@ -165,9 +145,13 @@ public class MllpTransport implements TransportStrategy {
                 break;
             }
 
+            if (endBlockFound) {
+                buffer.write(END_BLOCK);
+                endBlockFound = false;
+            }
+
             if (startFound) {
                 buffer.write(b);
-                endBlockFound = false;
             }
         }
 
